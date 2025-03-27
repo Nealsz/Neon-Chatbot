@@ -1,72 +1,72 @@
 <script lang="ts">
-    import { onMount } from "svelte";
     import MarkdownIt from "markdown-it";
 
     let userMessage = "";
-    let chatHistory = [];
+    let chatHistory: { role: string; content: string }[] = [];
     let loading = false;
     let botThinking = false;
-    let thinkingDetails = "";
-    let isThinkingExpanded = false;
-    const md = MarkdownIt();
+    const md = new MarkdownIt();
 
-    // Function to filter out <think> tags and their content
     function filterThinkTags(content: string): string {
-        // Regular expression to remove <think> tags and their content
-        return content.replace(/<think>.*?<\/think>/gs, '').trim();
+        if (!content) return "";
+        return content.replace(/<think>.*?<\/think>/gs, "").replace(/\*\*(.*?)\*\*/g, "<b>$1</b>");
     }
 
     async function sendMessage() {
         if (!userMessage.trim()) return;
-        
-        const userEntry = { role: "user", content: userMessage };
-        chatHistory = [...chatHistory, userEntry]; 
 
-        botThinking = true; 
+        chatHistory = [...chatHistory, { role: "user", content: userMessage }];
+        botThinking = true;
         loading = true;
-        isThinkingExpanded = false;
-        thinkingDetails = "";
 
-        const request = await fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userMessage, chatHistory }),
-        });
 
-        const apiResponse = await request.json();
-        
-        // Filter thinking details as well
-        thinkingDetails = filterThinkTags(apiResponse.thinkingDetails || "Analyzing the query...");
-        
-        // Filter the main response content
-        const filteredResponse = filterThinkTags(apiResponse.response);
-        
-        chatHistory = [...chatHistory, { role: "assistant", content: filteredResponse }];
-        
-        botThinking = false; 
-        userMessage = ""; // Ensure message is cleared
+        try {
+            userMessage = "";
+
+            const response = await fetch("/api/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userMessage, chatHistory }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status}`);
+            }
+
+            const apiResponse = await response.json();
+
+            if (!apiResponse || !apiResponse.response) {
+                throw new Error("Invalid API response");
+            }
+
+            const filteredResponse = filterThinkTags(apiResponse.response);
+            chatHistory = [...chatHistory, { role: "assistant", content: filteredResponse }];
+        } catch (error) {
+            console.error("Error sending message:", error);
+            chatHistory = [...chatHistory, { role: "assistant", content: "Something went wrong, please try again." }];
+        }
+
+        botThinking = false;
         loading = false;
+
+        // Ensure input resets properly
+        setTimeout(() => userMessage = "", 10);
     }
 
     function handleKeyPress(event: KeyboardEvent) {
-        if (event.key === 'Enter') {
-            event.preventDefault(); // Prevent default enter key behavior
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
             sendMessage();
-            userMessage = ""; // Explicitly clear the input
         }
     }
 
     $: if (chatHistory.length) {
         setTimeout(() => {
-            const messageContainer = document.querySelector('.message-container');
+            const messageContainer = document.querySelector(".message-container");
             if (messageContainer) {
                 messageContainer.scrollTop = messageContainer.scrollHeight;
             }
-        }, 50);
-    }
-
-    function toggleThinkingDetails() {
-        isThinkingExpanded = !isThinkingExpanded;
+        }, 100);
     }
 </script>
 
@@ -100,11 +100,7 @@
     }
 
     .user-message {
-        background: linear-gradient(
-            to right, 
-            rgba(93, 63, 211, 0.8), 
-            rgba(106, 90, 205, 0.8)
-        );
+        background: linear-gradient(to right, rgba(93, 63, 211, 0.8), rgba(106, 90, 205, 0.8));
         color: #e0e0e0;
         align-self: flex-end;
         margin-left: auto;
@@ -135,17 +131,6 @@
         text-align: left;
     }
 
-    .thinking-details {
-        max-height: 0;
-        overflow: hidden;
-        transition: max-height 0.3s ease;
-    }
-
-    .thinking-details.expanded {
-        max-height: 200px;
-        overflow-y: auto;
-    }
-
     .input-container {
         display: flex;
         padding: 15px;
@@ -169,11 +154,7 @@
 
     button {
         padding: 12px 20px;
-        background: linear-gradient(
-            to right, 
-            rgba(93, 63, 211, 0.9), 
-            rgba(106, 90, 205, 0.9)
-        );
+        background: linear-gradient(to right, rgba(93, 63, 211, 0.9), rgba(106, 90, 205, 0.9));
         color: #e0e0e0;
         border: none;
         border-radius: 8px;
@@ -194,29 +175,9 @@
 </style>
 
 <div class="message-container">
-    {#if botThinking && thinkingDetails}
-    <button 
-        on:click={() => isThinkingExpanded = !isThinkingExpanded}
-        on:keydown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                isThinkingExpanded = !isThinkingExpanded;
-            }
-        }}
-        aria-expanded={isThinkingExpanded}
-    >
-        {isThinkingExpanded ? 'Hide' : 'Show'} Thinking Process
-    </button>
-
-    {#if isThinkingExpanded}
-        <div class="thinking-details">
-            {@html md.render(thinkingDetails)}
-        </div>
-    {/if}
-{/if}
-
     {#each chatHistory as message (message.content)}
         <div class="message {message.role === 'user' ? 'user-message' : 'bot-message'}">
-            {@html md.render(message.content)}
+            {@html md.render(message.content || '')}
         </div>
     {/each}
 
